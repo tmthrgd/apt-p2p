@@ -369,8 +369,6 @@ func main() {
 		switch stat.Mode() {
 		case 0400, 0600:
 		default:
-			*key, *cert = "", ""
-
 			w := len("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
 			paddingLeft := strings.Repeat(" ", (w-4-len(*key))/2)
@@ -392,6 +390,8 @@ func main() {
 			fmt.Println("@                                         @")
 			fmt.Println("@    This private key will be ignored.    @")
 			fmt.Println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+
+			*key, *cert = "", ""
 		}
 	}
 
