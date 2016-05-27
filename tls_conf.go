@@ -1,4 +1,4 @@
-// +build !go1.6
+// +build !verify
 
 package main
 
