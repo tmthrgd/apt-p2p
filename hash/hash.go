@@ -79,19 +79,16 @@ func NewReaderN(r io.Reader, n int64, alg crypto.Hash) (h *Hash, read int64, err
 
 func Parse(s string) (*Hash, error) {
 	idx := strings.LastIndex(s, "-")
-
-	if len(s) == 0 || idx <= 0 || idx + 1 >= len(s) - 1 {
+	if len(s) == 0 || idx <= 0 || idx+1 >= len(s)-1 {
 		return nil, errParseHashError
 	}
 
 	alg, ok := nameToHash[strings.ToLower(s[:idx])]
-
 	if !ok || !alg.Available() {
 		return nil, errInvalidAlgorithmError
 	}
 
 	hashBytes, err := b64Encoding.DecodeString(s[idx+1:])
-
 	if err != nil {
 		return nil, err
 	}
@@ -163,15 +160,15 @@ var _ fmt.Stringer = (*Hash)(nil)
 
 func init() {
 	for i, name := range [...]string{
-		"md4",                                          // import golang.org/x/crypto/md4
-		"md5",                                          // import crypto/md5
-		"sha1",                                         // import crypto/sha1
-		"sha224", "sha256",                             // import crypto/sha256
-		"sha384", "sha512",                             // import crypto/sha512
+		"md4",              // import golang.org/x/crypto/md4
+		"md5",              // import crypto/md5
+		"sha1",             // import crypto/sha1
+		"sha224", "sha256", // import crypto/sha256
+		"sha384", "sha512", // import crypto/sha512
 		"",                                             // no implementation; MD5+SHA1 used for TLS RSA
 		"ripemd160",                                    // import golang.org/x/crypto/ripemd160
 		"sha3-224", "sha3-256", "sha3-384", "sha3-512", // import golang.org/x/crypto/sha3
-		"sha512-224", "sha512-256",                     // import crypto/sha512
+		"sha512-224", "sha512-256", // import crypto/sha512
 	} {
 		if len(name) == 0 {
 			continue
@@ -190,10 +187,10 @@ func init() {
 
 	for i, size := range [...]string{"224", "256"} {
 		hash := crypto.Hash(i) + crypto.SHA512_224
-		nameToHash["sha512:" + size] = hash
-		nameToHash["sha-512:" + size] = hash
-		nameToHash["sha-512-" + size] = hash
-		nameToHash["sha-512/" + size] = hash
+		nameToHash["sha512:"+size] = hash
+		nameToHash["sha-512:"+size] = hash
+		nameToHash["sha-512-"+size] = hash
+		nameToHash["sha-512/"+size] = hash
 	}
 
 	for i, name := range [...]string{"sha3:224", "sha3:256", "sha3:384", "sha3:512"} {
