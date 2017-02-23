@@ -1,8 +1,6 @@
 package main
 
 type configStruct struct {
-	_ struct{} // to prevent unkeyed literals
-
 	Verbose bool
 	Quiet   bool
 
@@ -10,14 +8,10 @@ type configStruct struct {
 	ArchiveFiles []string
 
 	Trusted map[string]struct {
-		_ struct{} // to prevent unkeyed literals
-
 		SPKI string
 	}
 
 	Storage struct {
-		_ struct{} // to prevent unkeyed literals
-
 		Address string
 
 		CertFile string
@@ -25,12 +19,12 @@ type configStruct struct {
 	}
 
 	Proxy struct {
-		_ struct{} // to prevent unkeyed literals
-
 		Address string
 
 		CertFile string
 		KeyFile  string
+
+		GNUTLS2 bool
 	}
 }
 

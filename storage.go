@@ -64,49 +64,48 @@ func canServeFile(dir, name string, _ *http.Request) bool {
 	}
 }
 
-func verifyCertificate(cert *x509.Certificate, opts x509.VerifyOptions) ([][]*x509.Certificate, error) {
-	if len(cert.UnhandledCriticalExtensions) > 0 {
-		return nil, x509.UnhandledCriticalExtension{}
+func verifyCertificate(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	cert, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return err
 	}
 
-	// err = cert.isValid(leafCertificate, nil, &opts)
-
-	// opts.KeyUsages
+	if len(cert.UnhandledCriticalExtensions) > 0 {
+		return x509.UnhandledCriticalExtension{}
+	}
 
 	spkis := make(map[crypto.Hash]*hash.Hash)
 
 	for _, peer := range config.Trusted {
 		spki, err := hash.Parse(peer.SPKI)
-
 		if err != nil {
 			log.Println(err)
 			continue
 		}
 
 		certSPKI, ok := spkis[spki.HashAlgorithm()]
-
 		if !ok {
 			if certSPKI, err = hash.New(cert.RawSubjectPublicKeyInfo, spki.HashAlgorithm()); err != nil {
-				return nil, err
+				return err
 			}
 
 			spkis[spki.HashAlgorithm()] = certSPKI
 		}
 
 		if spki.Equal(certSPKI) {
-			return [][]*x509.Certificate{{cert}}, nil
+			return nil
 		}
 	}
 
-	return nil, x509.UnknownAuthorityError{}
+	return x509.UnknownAuthorityError{}
 }
 
 func emptyResponse(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	checkLastModified(w, r, buildTime)
+	checkLastModified(w, r, startTime)
 }
 
 func serveFakeStatic(w http.ResponseWriter, r *http.Request, body []byte, mimeType string) {
-	if checkLastModified(w, r, buildTime) {
+	if checkLastModified(w, r, startTime) {
 		return
 	}
 
@@ -141,7 +140,6 @@ func getArchive(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	var fileHash *hash.Hash
 
 	name, hashString := p.ByName("name"), p.ByName("hash")
-
 	if len(hashString) == 0 || strings.HasPrefix(name, ".") {
 		err = os.ErrNotExist
 		goto respondError
@@ -167,7 +165,6 @@ func getArchive(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	if os.IsNotExist(err) {
 		for _, extra := range config.ArchiveFiles {
 			dir, n := path.Split(extra)
-
 			if n != name || !canServeFile(dir, name, r) {
 				continue
 			}
@@ -242,14 +239,6 @@ type storageHeaderServer struct {
 }
 
 func (s *storageHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !hasVerifyCertificate && r.TLS != nil {
-		if err := tlsFallbackVerify(r.TLS.PeerCertificates, verifyCertificate); err != nil {
-			log.Println(err)
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-			return
-		}
-	}
-
 	h := w.Header()
 	h.Set("Server", serverName)
 	h.Add("Strict-Transport-Security", stsHeaderValue)
@@ -266,7 +255,6 @@ func storageServerPrepare() error {
 	// x509 Certificate
 	if len(config.Storage.CertFile) == 0 && len(config.Storage.KeyFile) == 0 {
 		var err error
-
 		if certData, privKey, err = generatePeerCertificate(false); err != nil {
 			return err
 		}
@@ -276,7 +264,6 @@ func storageServerPrepare() error {
 		}
 	} else {
 		cert, err := tls.LoadX509KeyPair(config.Storage.CertFile, config.Storage.KeyFile)
-
 		if err != nil {
 			return err
 		}
@@ -323,8 +310,7 @@ func storageServer(done chan struct{}) error {
 
 	// Server
 	clientAuth := tls.NoClientCert
-
-	if hasVerifyCertificate && len(config.Trusted) != 0 {
+	if len(config.Trusted) != 0 {
 		clientAuth = tls.RequireAndVerifyClientCert
 	}
 
@@ -332,40 +318,39 @@ func storageServer(done chan struct{}) error {
 		Addr:    config.Storage.Address,
 		Handler: &storageHeaderServer{router},
 
-		TLSConfig: tlsConfigServer(&tls.Config{
+		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{aptCert},
 
 			CipherSuites: []uint16{
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 			},
 			PreferServerCipherSuites: true,
 
 			MinVersion: tls.VersionTLS12,
 
 			ClientAuth: clientAuth,
-		}, verifyCertificate),
+
+			VerifyPeerCertificate: verifyCertificate,
+			InsecureSkipVerify:    true,
+		},
 	}
 
 	if config.Verbose {
 		server.Handler = handlers.LoggingHandler(os.Stdout, server.Handler)
 	}
 
-	if err := http2ConfigureServer(server); err != nil {
-		return err
-	}
-
 	// DNS-SD
 	_, portString, err := net.SplitHostPort(config.Storage.Address)
-
 	if err != nil {
 		return err
 	}
 
 	port, err := strconv.Atoi(portString)
-
 	if err != nil {
 		return err
 	}
@@ -373,7 +358,6 @@ func storageServer(done chan struct{}) error {
 	op, err := newRegisterOp("", dnssdServiceType, port, map[string]string{
 		dnssdSPKIKey: spkiHash.String(),
 	})
-
 	if err != nil {
 		return err
 	}

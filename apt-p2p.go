@@ -1,46 +1,12 @@
 package main
 
-// BUILD
-//
-// build: go fmt github.com/tmthrgd/apt-p2p && go install -race -tags gnutls2 -ldflags "-X 'main.xBuildTime=`date -R`'" github.com/tmthrgd/apt-p2p && (rsync -a $(which apt-p2p) tom@xenox:~/apt-p2p; apt-p2p -v)
-// alt build (DO NOT USE): goimports -l -w $GOPATH/src/github.com/tmthrgd/apt-p2p && go install -race -tags gnutls2 -ldflags "-X 'main.xBuildTime=`date -R`'" github.com/tmthrgd/apt-p2p && (rsync -a $(which apt-p2p) tom@xenox:~/apt-p2p; apt-p2p -v)
-//
-// "-X 'main.version=`date -u +%Y.%j`.`date -u +"%H*60*60 + %M*60 + %S" | bc`-dev'"
-// "-X 'main.version=`date -u +%Y.%j`-`git rev-parse --short HEAD`-dev'"
-// "-X 'main.version=`git describe --tags`'"
-//
-// get custom go: git clone https://github.com/golang/go.git .go && cd .go && git remote add patch https://github.com/tmthrgd/go.git && git pull patch VerifyCertificate && git checkout VerifyCertificate && git rebase master
-// build custom go: cd src && GOROOT=$HOME/go GOROOT_FINAL=$HOME/.go ./make.bash && cd ..
-// alt build custom go: cd src && GOROOT_BOOTSTRAP=$HOME/.go GOROOT=$HOME/go GOROOT_FINAL=$HOME/.go ./make.bash && cd ..
-//
-// custom dbus: cd $GOPATH/src/github.com/godbus/dbus && git origin remote add patch https://github.com/tmthrgd/dbus.git && git pull patch remove-signal && git checkout remove-signal && git rebase master
-//
-// apt versions supporting https proxy auto detect: curl -s https://mirrors.kernel.org/ubuntu/pool/main/a/apt/ | hxselect -c -s '\n' 'a[href$=".tar.xz"]' 2>/dev/null | xargs -I '{}' sh -c "curl -s 'https://mirrors.kernel.org/ubuntu/pool/main/a/apt/{}' | tar -xJ --to-command='grep --label=\"{}\" -H AutoDetectProxy' --wildcards '*/methods/https.cc' 2>/dev/null"
-//
-// VET
-//
-// go tool vet $GOPATH/src/github.com/tmthrgd/apt-p2p/*
-//
-// golint github.com/tmthrgd/apt-p2p
-//
-// errcheck -asserts -blank github.com/tmthrgd/apt-p2p
-//
-// TEST
-//
-// curl storage testing: curl -k -v -I --cert curl-cert.pem --key curl-key.pem https://thrax.local:3128/
-// curl proxy testing: curl -k -v -I -x http://127.0.0.1:3142/ https://www.google.com/
-//
-// ssl testing: testssl.sh -e -p -y -U -s -H --assuming-http --quiet https://127.0.0.1:3128/
-//
-// get spki: dbus-send --system --print-reply=literal --dest=com.github.tmthrgd.AptP2P / org.freedesktop.DBus.Properties.Get string:com.github.tmthrgd.AptP2P string:Hash | sed -e 's/\s\+variant\s\+//' && echo
-//
 // SETUP
-//
+
 // peer certificate: ./apt-p2p --generate --peer-cert peer-cert.pem --peer-key peer-key.pem && sudo mv peer-{cert,key}.pem /etc/apt-p2p/
 // proxy certificate: ./apt-p2p --generate --proxy-cert proxy-cert.pem --proxy-key proxy-key.pem && sudo mv proxy-{cert,key}.pem /etc/apt-p2p/
-//
-// curl ca certs: wget http://curl.haxx.se/ca/cacert.pem && sudo mv cacert.pem /etc/apt-p2p/curl-cacert.pem && (echo && echo "APT-P2P - Root CA" && echo "=================") | sudo tee -a /etc/apt-p2p/curl-cacert.pem && </etc/apt-p2p/proxy-cert.pem sudo tee -a /etc/apt-p2p/curl-cacert.pem
-//
+
+// curl ca certs: wget https://curl.haxx.se/ca/cacert.pem && sudo mv cacert.pem /etc/apt-p2p/curl-cacert.pem && (echo && echo "APT-P2P - Root CA" && echo "=================") | sudo tee -a /etc/apt-p2p/curl-cacert.pem && </etc/apt-p2p/proxy-cert.pem sudo tee -a /etc/apt-p2p/curl-cacert.pem
+
 /* IF apt >= apt_1.0.9.7ubuntu4.tar.xz
  * apt proxy: sudo tee /etc/apt/apt.conf.d/01proxy <<'EOF'
 # undocumented feature which was found in the source. It should be an absolute
@@ -55,15 +21,8 @@ EOF
 Acquire::http::Proxy "http://127.0.0.1:3142";
 
 Acquire::https::CaInfo "/etc/apt-p2p/proxy-cert.pem";
-
-# undocumented feature which was found in the source. It should be an absolute
-# path to the program, no arguments are allowed. stdout contains the proxy
-# server, stderr is shown (in stderr) but ignored by APT
-#Acquire::http::ProxyAutoDetect "/etc/apt-p2p/apt-detect-http-proxy";
-#
-#Acquire::https::CaInfo "/etc/apt-p2p/curl-cacert.pem";
 EOF */
-//
+
 /* apt proxy detect: sudo tee /etc/apt-p2p/apt-detect-http-proxy <<'EOF' && sudo chmod +x /etc/apt-p2p/apt-detect-http-proxy
 #!/bin/bash
 # detect-http-proxy - Returns an APT-P2P proxy server which is available for use
@@ -76,7 +35,7 @@ else
         echo DIRECT
 fi
 EOF */
-//
+
 /* dbus permissions: sudo tee /etc/dbus-1/system.d/apt-p2p.conf <<'EOF'
 <!DOCTYPE busconfig PUBLIC
           "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
@@ -122,8 +81,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
@@ -131,20 +88,18 @@ import (
 	"github.com/naoina/toml"
 )
 
-var (
-	xBuildTime string
-	buildTime  time.Time
-
-	version string
+const (
+	serverName = "apt-p2p"
+	userAgent  = "apt-p2p"
 )
 
-var (
-	serverName = "apt-p2p (" + version + ")"
-	userAgent  = "apt-p2p (" + version + ")"
-)
+var startTime = time.Now()
 
 // TLS
-var errKeyTypeUnsupported = errors.New("apt: x509: only RSA and ECDSA private keys supported")
+var (
+	errKeyTypeUnsupported = errors.New("apt: x509: only RSA and ECDSA private keys supported")
+	errNoCertificate      = errors.New("apt: tls: no certificate provided")
+)
 
 func must(err error) {
 	if err != nil {
@@ -154,37 +109,19 @@ func must(err error) {
 
 // Main
 func init() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	if len(version) == 0 {
-		panic("version not set at compile-time")
-	}
-
-	var err error
-
-	if buildTime, err = time.Parse(time.RFC1123Z, xBuildTime); err != nil {
-		panic(err)
-	}
-
 	flag.BoolVar(&config.Verbose, "verbose", config.Verbose, "verbose")
 	flag.BoolVar(&config.Verbose, "v", config.Verbose, "verbose")
 
 	flag.BoolVar(&config.Quiet, "quiet", config.Quiet, "quiet")
 	flag.BoolVar(&config.Quiet, "q", config.Quiet, "quiet")
-	flag.BoolVar(&config.Quiet, "silent", config.Quiet, "silent")
 
 	flag.StringVar(&configPath, "config", configPath, "path to configuration file")
 	flag.StringVar(&configPath, "c", configPath, "path to configuration file")
+
+	flag.BoolVar(&config.Proxy.GNUTLS2, "gnutls2", config.Proxy.GNUTLS2, "allow older TLS ciphers for GNUTLS2")
 }
 
 func main() {
-	// DEBUG
-	if f, err := os.Create("cpu.prof"); err != nil {
-		if err = pprof.StartCPUProfile(f); err != nil {
-			defer pprof.StopCPUProfile()
-		}
-	}
-
 	storageAddress := flag.String("address", "", "storage server address")
 	storageAddressShort := flag.String("a", "", "storage server address")
 
@@ -199,17 +136,7 @@ func main() {
 
 	generateCert := flag.Bool("generate", false, "generate a x509 certificate")
 
-	versionFlag := flag.Bool("version", false, "print program version")
-	versionFlagShort := flag.Bool("V", false, "print program version")
-
 	flag.Parse()
-
-	if *versionFlag || *versionFlagShort {
-		fmt.Printf("apt-p2p %s\n\n", version)
-		fmt.Printf("Compiled date: %s\n", buildTime)
-		fmt.Printf("With compiler: go version %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-		return
-	}
 
 	if *generateCert {
 		certFile, keyFile := *storageCert, *storageKey
@@ -278,11 +205,6 @@ func main() {
 
 	quiet, verbose := config.Quiet, config.Verbose
 
-	// Banner
-	if !config.Quiet {
-		fmt.Printf("apt-p2p %s\n\n", version)
-	}
-
 	if f, err := os.Open(os.ExpandEnv(configPath)); err == nil {
 		err = toml.NewDecoder(f).Decode(&config)
 		must(f.Close())
@@ -330,14 +252,10 @@ func main() {
 	} {
 		if len(files[0]) != 0 {
 			*path = files[0]
-		}
-
-		if len(*path) != 0 {
-			continue
-		}
-
-		if _, err := os.Stat(files[1]); !os.IsNotExist(err) {
-			*path = files[1]
+		} else if len(*path) == 0 {
+			if _, err := os.Stat(files[1]); !os.IsNotExist(err) {
+				*path = files[1]
+			}
 		}
 	}
 
@@ -352,16 +270,15 @@ func main() {
 		}
 	}
 
-	for key, cert := range map[*string]*string{
-		&config.Storage.KeyFile: &config.Storage.CertFile,
-		&config.Proxy.KeyFile:   &config.Proxy.CertFile,
+	for _, cert := range [...]struct{ keyFile, certFile *string }{
+		{&config.Storage.KeyFile, &config.Storage.CertFile},
+		{&config.Proxy.KeyFile, &config.Proxy.CertFile},
 	} {
-		if len(*key) == 0 {
+		if len(*cert.keyFile) == 0 {
 			continue
 		}
 
-		stat, err := os.Stat(*key)
-
+		stat, err := os.Stat(*cert.keyFile)
 		if err != nil {
 			continue
 		}
@@ -371,10 +288,10 @@ func main() {
 		default:
 			w := len("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
-			paddingLeft := strings.Repeat(" ", (w-4-len(*key))/2)
+			paddingLeft := strings.Repeat(" ", (w-4-len(*cert.keyFile))/2)
 			paddingRight := paddingLeft
 
-			if 4+len(paddingLeft)+len(paddingRight)+len(*key) == w-1 {
+			if 4+len(paddingLeft)+len(paddingRight)+len(*cert.keyFile) == w-1 {
 				paddingRight = paddingLeft + " "
 			}
 
@@ -382,7 +299,7 @@ func main() {
 			fmt.Println("@  WARNING: UNPROTECTED PRIVATE KEY FILE! @")
 			fmt.Println("@                                         @")
 			fmt.Printf("@          Permissions %#o for           @\n", stat.Mode())
-			fmt.Printf("@%s'%s'%s@\n", paddingLeft, *key, paddingRight)
+			fmt.Printf("@%s'%s'%s@\n", paddingLeft, *cert.keyFile, paddingRight)
 			fmt.Println("@              are too open.              @")
 			fmt.Println("@                                         @")
 			fmt.Println("@   It is recommended that your private   @")
@@ -391,7 +308,7 @@ func main() {
 			fmt.Println("@    This private key will be ignored.    @")
 			fmt.Println("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
-			*key, *cert = "", ""
+			*cert.keyFile, *cert.certFile = "", ""
 		}
 	}
 
@@ -435,8 +352,6 @@ func main() {
 		done <- struct{}{}
 		<-done
 	}
-
-	pprof.StopCPUProfile()
 
 	os.Exit(1)
 }

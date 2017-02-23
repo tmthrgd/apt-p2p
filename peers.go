@@ -29,8 +29,6 @@ var (
 )
 
 type aptPeer struct {
-	_ struct{} // to prevent unkeyed literals
-
 	name string
 	host string
 	port int
@@ -97,27 +95,22 @@ func (peer *aptPeer) Removed() bool {
 	return atomic.LoadInt32(&peer.removed) != 0
 }
 
-func (peer *aptPeer) getVerifyCertificate() func(*x509.Certificate, x509.VerifyOptions) ([][]*x509.Certificate, error) {
-	return func(cert *x509.Certificate, opts x509.VerifyOptions) ([][]*x509.Certificate, error) {
+func (peer *aptPeer) getVerifyCertificate() func([][]byte, [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		cert, err := x509.ParseCertificate(rawCerts[0])
+		if err != nil {
+			return err
+		}
+
 		if len(cert.UnhandledCriticalExtensions) > 0 {
-			return nil, x509.UnhandledCriticalExtension{}
+			return x509.UnhandledCriticalExtension{}
 		}
-
-		// err = cert.isValid(leafCertificate, nil, &opts)
-
-		if len(opts.DNSName) > 0 {
-			if err := cert.VerifyHostname(opts.DNSName); err != nil {
-				return nil, err
-			}
-		}
-
-		// opts.KeyUsages
 
 		if peer.spki.EqualData(cert.RawSubjectPublicKeyInfo) {
-			return [][]*x509.Certificate{{cert}}, nil
+			return nil
 		}
 
-		return nil, x509.UnknownAuthorityError{}
+		return x509.UnknownAuthorityError{}
 	}
 }
 
@@ -129,10 +122,8 @@ func (peer *aptPeer) transport() *http.Transport {
 		return peer.tr
 	}
 
-	verifyCertificate := peer.getVerifyCertificate()
-
 	tr := &http.Transport{
-		TLSClientConfig: tlsConfigClient(&tls.Config{
+		TLSClientConfig: &tls.Config{
 			ServerName: peer.host,
 
 			Certificates: []tls.Certificate{aptCert},
@@ -140,35 +131,18 @@ func (peer *aptPeer) transport() *http.Transport {
 			CipherSuites: []uint16{
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 			},
 
 			MinVersion: tls.VersionTLS12,
-		}, verifyCertificate),
+
+			VerifyPeerCertificate: peer.getVerifyCertificate(),
+			InsecureSkipVerify:    true,
+		},
 	}
-
-	// Move into tls_conf.go
-	if !hasVerifyCertificate {
-		tr.DialTLS = func(network, addr string) (net.Conn, error) {
-			conn, err := tls.Dial(network, addr, tr.TLSClientConfig)
-
-			if err != nil {
-				return nil, err
-			}
-
-			if err = tlsFallbackVerify(conn.ConnectionState().PeerCertificates, verifyCertificate); err != nil {
-				return nil, err
-			}
-
-			return conn, nil
-		}
-	}
-
-	if err := http2ConfigureTransport(tr); err != nil {
-		log.Println(err)
-	}
-
 	peer.tr = tr
 	return tr
 }

@@ -8,7 +8,6 @@ import (
 
 func init() {
 	var seed [8]byte
-
 	if _, err := crand.Read(seed[:]); err != nil {
 		panic(err)
 	}

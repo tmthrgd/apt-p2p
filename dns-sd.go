@@ -21,8 +21,8 @@ func dnssdBrowseAddedCallback(result *dnssdBrowseResult) {
 	}
 
 	resolveResults := make(chan *dnssdResolveResult, 1)
-	op, err := newResolveOp(result.InterfaceIndex, result.Name, result.ServiceType, result.Domain, resolveResults)
 
+	op, err := newResolveOp(result.InterfaceIndex, result.Name, result.ServiceType, result.Domain, resolveResults)
 	if err != nil {
 		log.Println(err)
 		return
@@ -40,13 +40,11 @@ func dnssdBrowseAddedCallback(result *dnssdBrowseResult) {
 	}
 
 	spkiString, ok := resolve.TXT[dnssdSPKIKey]
-
 	if !ok {
 		return
 	}
 
 	spki, err := hash.Parse(spkiString)
-
 	if err != nil {
 		log.Println(err)
 		return
@@ -79,10 +77,8 @@ func dnssdBrowseAddedCallback(result *dnssdBrowseResult) {
 
 			return
 		}
-	} else {
-		if config.Verbose {
-			log.Printf(`Found host "%s" running on port %d with spki: %s`, resolve.Host, resolve.Port, spki)
-		}
+	} else if config.Verbose {
+		log.Printf(`Found host "%s" running on port %d with spki: %s`, resolve.Host, resolve.Port, spki)
 	}
 
 	peers.RLock()

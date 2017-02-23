@@ -1,5 +1,3 @@
-// +build !libdnssd
-
 package main
 
 import (
@@ -102,7 +100,6 @@ func (b *dnssdBrowseOp) waitForSignal() {
 			}
 
 			err, ok := item.Body[0].(string)
-
 			if !ok {
 				continue
 			}
@@ -143,7 +140,6 @@ type dnssdResolveOp struct {
 
 func newResolveOp(interfaceIndex int, name, service, domain string, results chan<- *dnssdResolveResult) (*dnssdResolveOp, error) {
 	dconn, err := dbus.SystemBus()
-
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +150,6 @@ func newResolveOp(interfaceIndex int, name, service, domain string, results chan
 	obj := dconn.Object("org.freedesktop.Avahi", "/")
 
 	var path dbus.ObjectPath
-
 	if err = obj.Call("org.freedesktop.Avahi.Server.ServiceResolverNew", 0,
 		int32(interfaceIndex), // iinterface
 		int32(-1),             // avahi.PROTO_UNSPEC
@@ -217,7 +212,6 @@ func (r *dnssdResolveOp) waitForSignal() {
 
 			for _, rec := range AAY {
 				kv := strings.SplitN(string(rec), "=", 2)
-
 				switch len(kv) {
 				case 2:
 					result.TXT[kv[0]] = kv[1]
@@ -231,7 +225,6 @@ func (r *dnssdResolveOp) waitForSignal() {
 			}
 
 			err, ok := item.Body[0].(string)
-
 			if !ok {
 				continue
 			}
@@ -262,13 +255,11 @@ type dnssdRegisterOp struct {
 
 func newRegisterOp(name, service string, port int, txt map[string]string) (*dnssdRegisterOp, error) {
 	dconn, err := dbus.SystemBus()
-
 	if err != nil {
 		return nil, err
 	}
 
 	host, err := os.Hostname()
-
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +277,6 @@ func newRegisterOp(name, service string, port int, txt map[string]string) (*dnss
 	obj := dconn.Object("org.freedesktop.Avahi", "/")
 
 	var path dbus.ObjectPath
-
 	if err = obj.Call("org.freedesktop.Avahi.Server.EntryGroupNew", 0).Store(&path); err != nil {
 		return nil, err
 	}

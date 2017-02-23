@@ -19,7 +19,6 @@ import (
 
 func generatePeerCertificate(persistent bool) (cert []byte, priv *ecdsa.PrivateKey, err error) {
 	name, err := os.Hostname()
-
 	if err != nil {
 		return
 	}
@@ -49,13 +48,11 @@ func generatePeerCertificate(persistent bool) (cert []byte, priv *ecdsa.PrivateK
 
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 	})
-
 	if err != nil {
 		return
 	}
 
 	priv, ok := privKey.(*ecdsa.PrivateKey)
-
 	if !ok {
 		panic("generateCertificate did not produce ECDSA key")
 	}
@@ -131,11 +128,7 @@ func generateCertificate(config *generateCertConfig) (cert []byte, priv crypto.P
 	case *ecdsa.PrivateKey:
 		pub = &priv.PublicKey
 	default:
-		err = errKeyTypeUnsupported
-	}
-
-	if err != nil {
-		return
+		return nil, nil, errKeyTypeUnsupported
 	}
 
 	if c.SerialNumber == nil {
@@ -152,8 +145,8 @@ func generateCertificate(config *generateCertConfig) (cert []byte, priv crypto.P
 	if c.ValidTo.IsZero() {
 		if c.ValidForever {
 			notAfter := c.ValidFrom.AddDate(10, 0, 0).UTC()
-			year := notAfter.Year()
 
+			year := notAfter.Year()
 			if year%10 != 0 {
 				year = (year - year%10) + 10
 			}
@@ -226,7 +219,6 @@ func generateCertificate(config *generateCertConfig) (cert []byte, priv crypto.P
 
 func generateCertificateAndParse(config *generateCertConfig) (cert *x509.Certificate, priv crypto.PrivateKey, err error) {
 	certData, priv, err := generateCertificate(config)
-
 	if err != nil {
 		return
 	}
@@ -237,7 +229,6 @@ func generateCertificateAndParse(config *generateCertConfig) (cert *x509.Certifi
 
 func spkiHashForCertificate(pubKey crypto.PublicKey, alg crypto.Hash) (*hash.Hash, error) {
 	rawSubjectPublicKeyInfo, err := x509.MarshalPKIXPublicKey(pubKey)
-
 	if err != nil {
 		return nil, err
 	}

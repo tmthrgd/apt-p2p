@@ -101,30 +101,28 @@ const peerIntro = `<node>
 	</interface>
 ` + introspect.IntrospectDataString + prop.IntrospectDataString + `</node>`
 
-func relativePath(path, base dbus.ObjectPath) (dbus.ObjectPath, error) {
-	if len(base) > len(path) || path[:len(base)] != base {
-		return "", errors.New("path is not below base")
-	}
-
-	return path[len(base):], nil
+func relativePath(path, base dbus.ObjectPath) dbus.ObjectPath {
+	return dbus.ObjectPath(strings.TrimPrefix(string(path), string(base)))
 }
 
 type dBusExport struct{}
 
-func (*dBusExport) AddPeer(name, host string, port uint16, spki string) (dbus.ObjectPath, *dbus.Error) {
-	for name, value := range map[string]int{
-		"string:name": len(name),
-		"string:host": len(host),
-		"uint16:port": int(port),
-		"string:spki": len(spki),
+func (dBusExport) AddPeer(name, host string, port uint16, spki string) (dbus.ObjectPath, *dbus.Error) {
+	for _, param := range [...]struct {
+		name  string
+		valid bool
+	}{
+		{"string:name", len(name) != 0},
+		{"string:host", len(host) != 0},
+		{"uint16:port", int(port) != 0},
+		{"string:spki", len(spki) != 0},
 	} {
-		if value == 0 {
-			return "", dbus.NewError("org.freedesktop.DBus.Error.InvalidArgs", []interface{}{"Invalid arg " + name})
+		if !param.valid {
+			return "", dbus.NewError("org.freedesktop.DBus.Error.InvalidArgs", []interface{}{"Invalid arg " + param.name})
 		}
 	}
 
 	spkiHash, err := hash.Parse(spki)
-
 	if err != nil {
 		log.Println(err)
 		return "", dbus.NewError("org.freedesktop.DBus.Error.InvalidArgs", []interface{}{"Invalid arg string:spki"})
@@ -165,9 +163,15 @@ var exportedPeers = struct {
 }{}
 
 func (e *dbusPeerExport) HasFile(hash, name string) (bool, *dbus.Error) {
-	for name, value := range map[string]int{"string:hash": len(hash), "string:name": len(name)} {
-		if value == 0 {
-			return false, dbus.NewError("org.freedesktop.DBus.Error.InvalidArgs", []interface{}{"Invalid arg " + name})
+	for _, param := range [...]struct {
+		name  string
+		valid bool
+	}{
+		{"string:hash", len(hash) != 0},
+		{"string:name", len(name) != 0},
+	} {
+		if !param.valid {
+			return false, dbus.NewError("org.freedesktop.DBus.Error.InvalidArgs", []interface{}{"Invalid arg " + param.name})
 		}
 	}
 
@@ -178,13 +182,12 @@ func (e *dbusPeerExport) HasFile(hash, name string) (bool, *dbus.Error) {
 	}
 
 	resp, err := e.peer.Head(path.Join("/get", hash, name), headers)
-
 	if err != nil {
 		log.Println(err)
 		return false, dbus.NewError("org.freedesktop.DBus.Error.Failed", []interface{}{err.Error()})
 	}
 
-	// https://golang.org/src/net/http/client.go#L391
+	// https://golang.org/src/net/http/client.go#L570
 	// Read the body if small so underlying TCP connection will be re-used.
 	// No need to check for errors: if it fails, Transport won't reuse it anyway.
 	const maxBodySlurpSize = 2 << 10
@@ -213,13 +216,11 @@ var dbusProps *prop.Properties
 
 func dbusServe(done chan struct{}) error {
 	conn, err := dbus.SystemBus()
-
 	if err != nil {
 		return err
 	}
 
 	reply, err := conn.RequestName(dbusIface, dbus.NameFlagDoNotQueue)
-
 	if err != nil {
 		return err
 	}
@@ -230,7 +231,7 @@ func dbusServe(done chan struct{}) error {
 
 	var buf bytes.Buffer
 
-	if err = conn.Export(new(dBusExport), dbusPath, dbusIface); err != nil {
+	if err = conn.Export(dBusExport{}, dbusPath, dbusIface); err != nil {
 		goto handleError
 	}
 
@@ -268,7 +269,6 @@ func dbusServe(done chan struct{}) error {
 	}
 
 	done <- struct{}{}
-
 	return nil
 
 handleError:
@@ -281,7 +281,6 @@ handleError:
 
 func untrustedPeer(name, host string, port int, spki *hash.Hash) error {
 	conn, err := dbus.SystemBus()
-
 	if err != nil {
 		return err
 	}
@@ -293,7 +292,6 @@ var peerID uint64
 
 func addedPeer(peer *aptPeer) error {
 	conn, err := dbus.SystemBus()
-
 	if err != nil {
 		return err
 	}
@@ -350,7 +348,6 @@ handleError:
 
 func removedPeer(peer *aptPeer) error {
 	conn, err := dbus.SystemBus()
-
 	if err != nil {
 		return err
 	}

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elazarl/goproxy"
+	"github.com/egbertp/goproxy"
 	"github.com/tmthrgd/apt-p2p/hash"
 )
 
@@ -54,8 +54,8 @@ func aptProxyReq(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.R
 	_, name := path.Split(req.URL.Path)
 
 	match := packageNameRegex.FindStringSubmatch(name)
-	aptCache, err := exec.Command("apt-cache", "show", match[1]+"="+match[2]).Output()
 
+	aptCache, err := exec.Command("apt-cache", "show", match[1]+"="+match[2]).Output()
 	if err != nil {
 		log.Println(err)
 		return req, nil
@@ -67,7 +67,6 @@ func aptProxyReq(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.R
 	}
 
 	hashBytes, err := hex.DecodeString(match[1])
-
 	if err != nil {
 		panic(err)
 	}
@@ -100,8 +99,8 @@ func aptProxyReq(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.R
 
 		c <- peerSlice[0]
 	default:
+		// TODO: this breaks keep-alive connection pooling, fix.
 		peerIndexes := rand.Perm(len(peerSlice))
-
 		if len(peerIndexes) > aptMaxPeers {
 			peerIndexes = peerIndexes[:aptMaxPeers]
 		}
@@ -124,13 +123,12 @@ func aptProxyReq(req *http.Request, _ *goproxy.ProxyCtx) (*http.Request, *http.R
 				}
 
 				resp, err := peer.Head(reqPath, headers)
-
 				if err != nil {
 					log.Println(err)
 					return
 				}
 
-				// https://golang.org/src/net/http/client.go#L391
+				// https://golang.org/src/net/http/client.go#L570
 				// Read the body if small so underlying TCP connection will be re-used.
 				// No need to check for errors: if it fails, Transport won't reuse it anyway.
 				const maxBodySlurpSize = 2 << 10
@@ -192,10 +190,13 @@ var (
 	}{m: make(map[string]*tls.Certificate, 12)}
 )
 
-var tlsCurves = map[tls.CurveID]func() elliptic.Curve{
-	tls.CurveP256: elliptic.P256,
-	tls.CurveP384: elliptic.P384,
-	tls.CurveP521: elliptic.P521,
+var tlsCurves = [...]struct {
+	id    tls.CurveID
+	curve func() elliptic.Curve
+}{
+	{tls.CurveP256, elliptic.P256},
+	{tls.CurveP384, elliptic.P384},
+	{tls.CurveP521, elliptic.P521},
 }
 
 var errUnsupportedCipherSuites = errors.New("apt: tls: no cipher suite supported by both client and server")
@@ -205,13 +206,15 @@ func aptProxyHandleConnectTLSConfig(hostPort string, _ *goproxy.ProxyCtx) (*tls.
 		CipherSuites: []uint16{
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 		PreferServerCipherSuites: true,
 	}
 
-	if hasGNUTLS2 {
+	if config.Proxy.GNUTLS2 {
 		// apt-transport-https relies on libcurl3-gnutls which relies on gnutls
 		//
 		// On Ubuntu <=14.04 the version of gnutls (~2.1x) only supports old (read: insecure) ciphers.
@@ -221,7 +224,6 @@ func aptProxyHandleConnectTLSConfig(hostPort string, _ *goproxy.ProxyCtx) (*tls.
 	}
 
 	host, _, err := net.SplitHostPort(hostPort)
-
 	if err != nil || len(host) == 0 {
 		host = hostPort
 	}
@@ -233,10 +235,10 @@ func aptProxyHandleConnectTLSConfig(hostPort string, _ *goproxy.ProxyCtx) (*tls.
 
 		if ecdsaCAKey != nil {
 		LoopCurves:
-			for curveID, curveFunc := range tlsCurves {
+			for _, supportedCurve := range tlsCurves {
 				for _, c := range clientHello.SupportedCurves {
-					if c == curveID {
-						curve = curveFunc()
+					if c == supportedCurve.id {
+						curve = supportedCurve.curve()
 						issuerCert, issuerKey = ecdsaCACert, ecdsaCAKey
 						certCache = &aptProxyECDSACerts
 						break LoopCurves
@@ -282,7 +284,6 @@ func aptProxyHandleConnectTLSConfig(hostPort string, _ *goproxy.ProxyCtx) (*tls.
 			Issuer:           issuerCert,
 			IssuerPrivateKey: issuerKey,
 		})
-
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +327,6 @@ func aptProxy() error {
 		}
 
 		var err error
-
 		if rsaCACert, rsaCAKey, err = generateCertificateAndParse(config); err != nil {
 			return err
 		}
@@ -347,7 +347,6 @@ func aptProxy() error {
 		}
 	} else {
 		cert, err := tls.LoadX509KeyPair(config.Proxy.CertFile, config.Proxy.KeyFile)
-
 		if err != nil {
 			return err
 		}
@@ -357,7 +356,6 @@ func aptProxy() error {
 		}
 
 		parsedCert, err := x509.ParseCertificate(cert.Certificate[0])
-
 		if err != nil {
 			return err
 		}
@@ -381,8 +379,8 @@ func aptProxy() error {
 
 	// Serve
 	server := &http.Server{Addr: config.Proxy.Address, Handler: aptProxy}
-	ln, err := net.Listen("tcp", server.Addr)
 
+	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err
 	}
